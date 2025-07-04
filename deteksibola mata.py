@@ -2,12 +2,16 @@ import cv2
 import mediapipe as mp
 import numpy as np
 
-# Inisialisasi tidak berubah
+#nisialisasi face mesh dari MediaPipe untuk mendeteksi titik-titik wajah
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(max_num_faces=1,
                                 refine_landmarks=True,
                                 min_detection_confidence=0.5,
                                 min_tracking_confidence=0.5)
+
+
+calibrated_center = None
+
 
 # Fungsi tidak berubah
 def get_gaze_direction(left_eye_landmarks, right_eye_landmarks):
@@ -31,6 +35,33 @@ def get_gaze_direction(left_eye_landmarks, right_eye_landmarks):
         
     return direction, gaze_ratio
 
+
+
+def detect_head_turn(face_landmarks, img_w, img_h):
+    nose_tip = face_landmarks.landmark[1]
+    left_cheek = face_landmarks.landmark[234]
+    right_cheek = face_landmarks.landmark[454]
+
+    nose_x = int(nose_tip.x * img_w)
+    left_x = int(left_cheek.x * img_w)
+    right_x = int(right_cheek.x * img_w)
+
+    dist_left = abs(nose_x - left_x)
+    dist_right = abs(nose_x - right_x)
+
+    ratio = dist_left / dist_right if dist_right != 0 else 1
+
+        #  mirroring arah kepala 
+    if ratio > 1.2:
+        direction = "KE KANAN" 
+    elif ratio < 0.8:
+            direction = "KE KIRI"  
+    else:
+        direction = "TENGAH"
+       
+
+    angle_diff = abs(dist_left - dist_right)
+    return direction, angle_diff
 
 # Mulai menangkap video
 cap = cv2.VideoCapture(0)
@@ -91,6 +122,78 @@ while cap.isOpened():
 
             except IndexError:
                 continue
+            
+              #  Deteksi arah kepala 
+            head_direction, angle_diff = detect_head_turn(face_landmarks, img_w, img_h)
+            cv2.putText(image, f"Kepala: {head_direction}", (50, 150),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
+
+            #  Estimasi arah pandangan dengan offset pipi
+            nose_tip = face_landmarks.landmark[1]
+            center_x = int(nose_tip.x * img_w)
+            center_y = int(nose_tip.y * img_h)
+            radius = 50
+
+            # Gunakan pipi kiri dan kanan untuk hitung offset
+            left_cheek = face_landmarks.landmark[234]
+            right_cheek = face_landmarks.landmark[454]
+            head_center_x = int((left_cheek.x + right_cheek.x) / 2 * img_w)
+            shift_x = (center_x - head_center_x) * 1  # perbesar pengaruh
+
+            # Titik arah hidung (bergerak sesuai arah pandangan)
+            titik_merah = (int(center_x + shift_x), int(center_y))
+
+            # Gambar lingkaran yang mengikuti hidung
+            cv2.circle(image, (center_x, center_y), radius, (0, 255, 0), 2)   # LINGKARAN HIJAU bergerak
+            cv2.circle(image, titik_merah, 5, (0, 0, 255), -1)               #  TITIK MERAH arah pandang
+
+            # Deteksi kecurangan jika titik arah pandang keluar dari zona aman
+            dx = titik_merah[0] - center_x
+            dy = titik_merah[1] - center_y
+            distance = np.sqrt(dx**2 + dy**2)
+
+            if distance > radius:
+                if abs(dx) > abs(dy):
+                    status = "Menyontek (Kiri/Kanan)"
+                else:
+                    status = "Menyontek (Atas/Bawah)"
+                cv2.putText(image, status, (50, 200),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+      
+            
+             # Kalibrasi posisi awal hidung
+            if calibrated_center is None:
+                calibrated_center = (int(face_landmarks.landmark[1].x * img_w),
+                                     int(face_landmarks.landmark[1].y * img_h))
+  
+            
+            
+            
+                    # Deteksi arah kepala berpaling
+        head_direction, angle_diff = detect_head_turn(face_landmarks, img_w, img_h)
+        cv2.putText(image, f"Kepala: {head_direction}", (50, 150),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
+        
+    
+       #  Gunakan posisi kalibrasi, bukan tengah layar default 
+        nose_tip = face_landmarks.landmark[1]
+        center_x = int(nose_tip.x * img_w)
+        center_y = int(nose_tip.y * img_h)
+        radius = 50  # zona aman
+
+            # Titik hidung sekarang
+        nose_point = (center_x, center_y)
+
+            # Gambar lingkaran yang mengikuti hidung
+        cv2.circle(image, (center_x, center_y), radius, (0, 255, 0), 2)
+        # cv2.circle(image, nose_point, 5, (0, 0, 255), -1)
+
+            # Jarak gerakan hidung terhadap lingkaran (harus kecil karena lingkaran ikut bergerak)
+        dx = nose_point[0] - center_x
+        dy = nose_point[1] - center_y
+        distance = np.sqrt(dx**2 + dy**2)
+            
+            
 
     cv2.imshow('Deteksi Arah Pandang Mata', image)
 
