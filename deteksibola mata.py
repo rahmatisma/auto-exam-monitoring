@@ -1,6 +1,7 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+import time
 
 #nisialisasi face mesh dari MediaPipe untuk mendeteksi titik-titik wajah
 mp_face_mesh = mp.solutions.face_mesh
@@ -9,9 +10,12 @@ face_mesh = mp_face_mesh.FaceMesh(max_num_faces=1,
                                 min_detection_confidence=0.5,
                                 min_tracking_confidence=0.5)
 
-
 calibrated_center = None
 
+# Untuk mencatat deteksi gerakan mata kiri/kanan
+last_direction = None
+direction_start_time = None
+captured = False
 
 # Fungsi tidak berubah
 def get_gaze_direction(left_eye_landmarks, right_eye_landmarks):
@@ -36,7 +40,6 @@ def get_gaze_direction(left_eye_landmarks, right_eye_landmarks):
     return direction, gaze_ratio
 
 
-
 def detect_head_turn(face_landmarks, img_w, img_h):
     nose_tip = face_landmarks.landmark[1]
     left_cheek = face_landmarks.landmark[234]
@@ -58,7 +61,6 @@ def detect_head_turn(face_landmarks, img_w, img_h):
             direction = "KE KIRI"  
     else:
         direction = "TENGAH"
-       
 
     angle_diff = abs(dist_left - dist_right)
     return direction, angle_diff
@@ -92,6 +94,31 @@ while cap.isOpened():
                 # Hitung arah pandangan
                 direction, gaze_ratio = get_gaze_direction(left_eye_coords, right_eye_coords)
 
+                # Deteksi arah pandangan terus-menerus
+                current_time = time.time()
+
+                if direction in ["KIRI", "KANAN"]:
+                    if last_direction != direction:
+                        last_direction = direction
+                        direction_start_time = current_time
+                        captured = False
+                    else:
+                        elapsed = current_time - direction_start_time
+                        if elapsed >= 1.0 and not captured:
+                            # Ambil capture saat deteksi arah yang sama selama 1 detik
+                            captured = True
+                            timestamp = int(time.time())
+                            filename = f"Bukti Menyontek/capture_{direction.lower()}_{timestamp}.jpg"
+                            cv2.imwrite(filename, image)
+                            
+                            # Tampilkan hasil capture di jendela baru
+                            captured_img = cv2.imread(filename)
+                            cv2.imshow(f'Tangkapan Menyontek ke {direction}', captured_img)
+                else:
+                    last_direction = None
+                    direction_start_time = None
+                    captured = False
+
                 # Visualisasi titik-titik mata kiri dan kanan
                 for pt in left_eye_coords:
                     cv2.circle(image, pt, 3, (0, 255, 255), -1)
@@ -123,7 +150,7 @@ while cap.isOpened():
             except IndexError:
                 continue
             
-              #  Deteksi arah kepala 
+            #  Deteksi arah kepala 
             head_direction, angle_diff = detect_head_turn(face_landmarks, img_w, img_h)
             cv2.putText(image, f"Kepala: {head_direction}", (50, 150),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
@@ -159,41 +186,34 @@ while cap.isOpened():
                     status = "Menyontek (Atas/Bawah)"
                 cv2.putText(image, status, (50, 200),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
-      
             
-             # Kalibrasi posisi awal hidung
+            # Kalibrasi posisi awal hidung
             if calibrated_center is None:
                 calibrated_center = (int(face_landmarks.landmark[1].x * img_w),
-                                     int(face_landmarks.landmark[1].y * img_h))
-  
-            
-            
-            
-                    # Deteksi arah kepala berpaling
+                                     int(face_landmarks.landmark[1].y * img_h))                    
+        # Deteksi arah kepala berpaling
         head_direction, angle_diff = detect_head_turn(face_landmarks, img_w, img_h)
         cv2.putText(image, f"Kepala: {head_direction}", (50, 150),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
         
     
-       #  Gunakan posisi kalibrasi, bukan tengah layar default 
+        #  Gunakan posisi kalibrasi, bukan tengah layar default 
         nose_tip = face_landmarks.landmark[1]
         center_x = int(nose_tip.x * img_w)
         center_y = int(nose_tip.y * img_h)
         radius = 50  # zona aman
 
-            # Titik hidung sekarang
+        # Titik hidung sekarang
         nose_point = (center_x, center_y)
 
-            # Gambar lingkaran yang mengikuti hidung
+        # Gambar lingkaran yang mengikuti hidung
         cv2.circle(image, (center_x, center_y), radius, (0, 255, 0), 2)
         # cv2.circle(image, nose_point, 5, (0, 0, 255), -1)
 
-            # Jarak gerakan hidung terhadap lingkaran (harus kecil karena lingkaran ikut bergerak)
+        # Jarak gerakan hidung terhadap lingkaran (harus kecil karena lingkaran ikut bergerak)
         dx = nose_point[0] - center_x
         dy = nose_point[1] - center_y
-        distance = np.sqrt(dx**2 + dy**2)
-            
-            
+        distance = np.sqrt(dx**2 + dy**2)    
 
     cv2.imshow('Deteksi Arah Pandang Mata', image)
 
